@@ -1,0 +1,112 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #07080f;
+  --g: #00e5a0;      /* normal / online */
+  --r: #f43f5e;      /* anomaly */
+  --text: #dde1f0;
+  --muted: #5a5f7a;
+  --border: #1a1d2e;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#globe-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* ── HUD overlay ── */
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hud-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.hud-title span {
+  color: var(--g);
+}
+
+.hud-sub {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  margin-top: 4px;
+}
+
+.hud-count {
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(13, 15, 26, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  backdrop-filter: blur(6px);
+}
+.hud-count b {
+  color: var(--g);
+  font-size: 15px;
+}
+
+.hud-legend {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(13, 15, 26, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  align-self: flex-start;
+  display: flex;
+  gap: 16px;
+  backdrop-filter: blur(6px);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-dot.normal { background: var(--g); box-shadow: 0 0 6px var(--g); }
+.legend-dot.anomaly { background: var(--r); box-shadow: 0 0 6px var(--r); }
+
+.hud-status {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
