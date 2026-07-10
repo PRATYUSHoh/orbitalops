@@ -1,0 +1,58 @@
+# services:
+#   app:
+#     build: .              # real config: build the Dockerfile in this folder
+#     ports:
+#       - "3001:3001"        # ← "host:container" — this text after # is just explaining the line, not code
+#     env_file: .env         # real config: load vars from .env
+#     depends_on:
+#       - postgres           # real config: wait for postgres container to start
+#       - redis               # real config: wait for redis container to start
+#                             # everything below is a COMMENT explaining depends_on's limitation — not config
+
+#   postgres:
+#     image: postgres:15      # real config: which Docker image to use
+#     environment:
+#       POSTGRES_PASSWORD:  password  # ← YOU need to fill in an actual value here, e.g. POSTGRES_PASSWORD: devpassword123
+#       POSTGRES_DB: orbitalops  # real config: creates a DB named "orbitalops" on first run
+#     volumes:
+#       - pgdata:/var/lib/postgresql/data   # real config: persists DB data
+#     ports:
+#       - "5432:5432"          # optional — only needed if you want psql/pgAdmin from your host machine
+
+#   redis:
+#     image: redis:7
+#     ports:
+#       - "6379:6379"           # optional — only needed for RedisInsight/redis-cli from host
+
+# volumes:
+#   pgdata:                     # real config: declares the named volume used above
+
+services:
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orbitalops
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No ports needed.
+    # The app reaches PostgreSQL over Docker's internal network
+    # using hostname "postgres".
+
+  redis:
+    image: redis:7
+    # No ports needed.
+    # The app reaches Redis over Docker's internal network
+    # using hostname "redis".
+
+volumes:
+  pgdata:
