@@ -5,7 +5,7 @@ services:
       - "3001:3001"
     env_file: .env
     volumes:
-      - .:/app          # syncs host folder with container — files written inside now persist
+      - .:/app
       - /app/node_modules
     depends_on:
       - postgres
@@ -18,26 +18,44 @@ services:
       POSTGRES_DB: orbitalops
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # No ports needed.
-    # The app reaches PostgreSQL over Docker's internal network
-    # using hostname "postgres".
+    # No ports needed — app reaches PostgreSQL over Docker's internal
+    # network using hostname "postgres".
 
   redis:
     image: redis:7
-    # No ports needed.
-    # The app reaches Redis over Docker's internal network
-    # using hostname "redis".
+    # No ports needed — app reaches Redis over Docker's internal
+    # network using hostname "redis".
 
   worker:
     build: .
     command: node src/workers/telemetryWorker.js
     env_file: .env
     volumes:
-      - .:/app          # syncs host folder with container — files written inside now persist
+      - .:/app
       - /app/node_modules
     depends_on:
       - postgres
       - redis
+    # No host port mapping needed — Prometheus reaches this container's
+    # :3002 metrics endpoint via the internal Docker network using
+    # hostname "worker", same pattern as postgres/redis.
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+      - worker
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
 volumes:
   pgdata:
