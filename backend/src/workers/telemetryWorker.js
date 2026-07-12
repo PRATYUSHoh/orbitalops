@@ -3,6 +3,8 @@ const { Worker } = require('bullmq');
 const pool = require('../config/db');
 const { checkAnomaly } = require('../services/anomalyDetector');
 const circuitBreaker = require('../services/circuitBreaker');
+const { createPublisher } = require('../services/socketPubSub');
+const publisher = createPublisher();
 const { telemetryDLQ, telemetryQueue } = require('../services/telemetryQueue');
 const {
   register,
@@ -26,11 +28,8 @@ metricsApp.get('/metrics', async (req, res) => {
 });
 metricsApp.listen(3002, () => console.log('Worker metrics server listening on :3002'));
 
-const connection = {
-  host: process.env.REDIS_HOST || 'redis',
-  port: process.env.REDIS_PORT || 6379,
-  maxRetriesPerRequest: null,
-};
+const { getRedisConnection } = require('../config/redisConnection');
+const connection = getRedisConnection();
 
 const FORCE_FAILURE_RATE = process.env.FORCE_FAILURE_RATE
   ? parseFloat(process.env.FORCE_FAILURE_RATE)
@@ -59,7 +58,15 @@ const worker = new Worker(
     }
 
     await pool.query(`UPDATE jobs SET status = 'done' WHERE id = $1`, [jobId]);
-    await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
+
+    // checkAnomaly returns the array of alerts fired for this event —
+    // reuse that to derive isAnomaly instead of calling detection logic twice.
+    const alerts = await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
+    const isAnomaly = alerts.length > 0;
+
+    // Publish to Redis — the app container's Socket.io server is subscribed
+    // to this channel and will re-broadcast to connected browser clients.
+    publisher.publish({ satellite_id, isAnomaly });
 
     const durationMs = Date.now() - start;
     jobsProcessedTotal.inc({ status: 'done' });
@@ -77,6 +84,7 @@ const alertWorker = new Worker(
   },
   { connection, concurrency: 5 }
 );
+
 // Poll queue depth every 5 seconds and update the gauge
 setInterval(async () => {
   try {
@@ -86,6 +94,7 @@ setInterval(async () => {
     console.error('Failed to poll queue depth:', err.message);
   }
 }, 5000);
+
 worker.on('failed', async (job, err) => {
   console.error(`Job ${job.id} failed permanently:`, err.message);
   const { jobId } = job.data;
