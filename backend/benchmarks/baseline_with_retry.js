@@ -1,4 +1,4 @@
-const telemetryQueue = require('../src/services/telemetryQueue');
+const { telemetryQueue } = require('../services/telemetryQueue');
 const pool = require('../src/config/db');
 const fs = require('fs');
 const path = require('path');
