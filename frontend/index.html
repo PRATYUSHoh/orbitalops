@@ -12,11 +12,13 @@
     }
   }
   </script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
   <div id="app">
     <canvas id="globe-canvas"></canvas>
     <div id="hud"></div>
+    <div id="connection-status" style="position:absolute; top:12px; right:16px; font-family:'Space Mono', monospace; color:#ef4444;">● Disconnected</div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
