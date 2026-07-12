@@ -1,8 +1,30 @@
+const express = require('express');
 const { Worker } = require('bullmq');
 const pool = require('../config/db');
 const { checkAnomaly } = require('../services/anomalyDetector');
 const circuitBreaker = require('../services/circuitBreaker');
-const { telemetryDLQ } = require('../services/telemetryQueue');
+const { telemetryDLQ, telemetryQueue } = require('../services/telemetryQueue');
+const {
+  register,
+  jobsProcessedTotal,
+  jobProcessingDuration,
+  queueDepth,
+  retryAttemptsTotal,
+  dlqJobsTotal,
+} = require('../middleware/metrics');
+
+// --- Worker's own metrics server ---
+// The worker runs in a SEPARATE Node process/container from the Express app,
+// so it has its own in-memory Prometheus registry. The app's /metrics endpoint
+// only sees counters incremented inside the app process — it can NEVER see
+// what the worker increments. So the worker needs to expose its own /metrics
+// endpoint too, and Prometheus scrapes BOTH targets separately.
+const metricsApp = express();
+metricsApp.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
+metricsApp.listen(3002, () => console.log('Worker metrics server listening on :3002'));
 
 const connection = {
   host: process.env.REDIS_HOST || 'redis',
@@ -39,21 +61,31 @@ const worker = new Worker(
     await pool.query(`UPDATE jobs SET status = 'done' WHERE id = $1`, [jobId]);
     await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
 
-    console.log(`Job ${job.id} (db job ${jobId}) done in ${Date.now() - start}ms`);
+    const durationMs = Date.now() - start;
+    jobsProcessedTotal.inc({ status: 'done' });
+    jobProcessingDuration.observe(durationMs / 1000);
+
+    console.log(`Job ${job.id} (db job ${jobId}) done in ${durationMs}ms`);
   },
   { connection, concurrency: 10 }
 );
 
-// New: dedicated worker for alert jobs (separate queue, own concurrency)
 const alertWorker = new Worker(
   'alert-queue',
   async (job) => {
     console.log(`🔔 Processing alert job ${job.id}:`, job.data.type, 'for satellite', job.data.satellite_id);
-    // Placeholder for real alert-handling logic (e.g. notify, escalate)
   },
   { connection, concurrency: 5 }
 );
-
+// Poll queue depth every 5 seconds and update the gauge
+setInterval(async () => {
+  try {
+    const waiting = await telemetryQueue.getWaitingCount();
+    queueDepth.set(waiting);
+  } catch (err) {
+    console.error('Failed to poll queue depth:', err.message);
+  }
+}, 5000);
 worker.on('failed', async (job, err) => {
   console.error(`Job ${job.id} failed permanently:`, err.message);
   const { jobId } = job.data;
@@ -67,10 +99,12 @@ worker.on('failed', async (job, err) => {
     circuitBreaker.recordError();
   }
 
-  console.log(`DEBUG: job.attemptsMade=${job.attemptsMade}, job.opts.attempts=${job.opts?.attempts}`);
+  jobsProcessedTotal.inc({ status: 'failed' });
+  retryAttemptsTotal.inc();
 
   if (job.attemptsMade >= job.opts.attempts) {
     await telemetryDLQ.add('dead-letter', { ...job.data, failedReason: err.message });
+    dlqJobsTotal.inc();
     console.log(`💀 Job ${job.id} moved to DLQ`);
   }
 });
