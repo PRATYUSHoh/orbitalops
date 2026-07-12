@@ -1,0 +1,22 @@
+config:
+  target: "http://localhost:3001"
+  phases:
+    - duration: 60
+      arrivalRate: 1
+      rampTo: 200
+      name: "Ramp to 200 concurrent users over 60s"
+  plugins:
+    metrics-by-endpoint: {}
+
+scenarios:
+  - name: "Satellite health check"
+    weight: 50
+    flow:
+      - get:
+          url: "/api/satellites/2/health"
+
+  - name: "Alerts list"
+    weight: 50
+    flow:
+      - get:
+          url: "/api/alerts?limit=20&offset=0"
