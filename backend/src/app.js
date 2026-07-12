@@ -4,17 +4,32 @@
 const express = require('express');
 const morgan = require('morgan');
 const healthRoute = require('./routes/health.route');
-const errorHandler = require('./middleware/errorHandler');
 const telemetryRoute = require('./routes/telemetry.route');
+const satelliteRoute = require('./routes/satellite.route');
+const jobRoute = require('./routes/job.route');
+const alertRoute = require('./routes/alert.route');
+const errorHandler = require('./middleware/errorHandler');
+const { register } = require('./middleware/metrics');
 
 const app = express();
 
-app.use(morgan('dev'));       // logs every request to console — method, path, status, response time
+// Middleware FIRST — must run before any route handles a request
+app.use(morgan('dev'));       // logs every request — method, path, status, response time
 app.use(express.json());      // parses JSON request bodies into req.body
 
+// Routes
 app.use('/health', healthRoute);
-
 app.use('/api/telemetry', telemetryRoute);
-app.use(errorHandler);        // must be last — after all routes are registered
+app.use('/api/satellites', satelliteRoute);
+app.use('/api/jobs', jobRoute);
+app.use('/api/alerts', alertRoute);
+
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
+
+// Error handler MUST be last — after all routes are registered
+app.use(errorHandler);
 
 module.exports = app;
