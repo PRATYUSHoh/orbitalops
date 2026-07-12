@@ -1,0 +1,34 @@
+[
+  {
+    "timestamp": "2026-07-12T09:25:11.923Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 10.18,
+    "eventsPerMin": 58933.3
+  },
+  {
+    "timestamp": "2026-07-12T09:25:55.319Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 10.76,
+    "eventsPerMin": 55746.5
+  },
+  {
+    "timestamp": "2026-07-12T09:26:49.899Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 10.72,
+    "eventsPerMin": 55991
+  },
+  {
+    "timestamp": "2026-07-12T11:17:20.264Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 9.76,
+    "eventsPerMin": 61500.6
+  }
+]
