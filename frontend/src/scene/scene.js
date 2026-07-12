@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 /**
  * Sets up the base three.js scene: renderer, camera, controls, lighting.
  * Returns handles so other modules (globe, satellites) can add to the scene
