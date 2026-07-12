@@ -1,81 +1,113 @@
 {
   "title": "OrbitalOps Monitoring",
+  "uid": "orbitalops-monitoring",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "5s",
-  "time": { "from": "now-15m", "to": "now" },
+  "time": { "from": "now-1h", "to": "now" },
   "panels": [
     {
       "id": 1,
       "title": "Telemetry Ingestion Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "rate(jobs_processed_total[1m]) * 60", "legendFormat": "{{status}}", "refId": "A" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "sum(rate(jobs_processed_total[1m])) by (status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 2,
       "title": "Job Processing Latency (p50/p95)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "histogram_quantile(0.50, rate(job_processing_duration_seconds_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, rate(job_processing_duration_seconds_bucket[5m]))", "legendFormat": "p95", "refId": "B" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "histogram_quantile(0.5, sum(rate(job_processing_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "histogram_quantile(0.95, sum(rate(job_processing_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
     },
     {
       "id": 3,
       "title": "Anomaly Alert Frequency",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "rate(anomalies_detected_total[5m]) * 60", "legendFormat": "{{type}}", "refId": "A" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "sum(rate(anomalies_detected_total[5m])) by (type)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 4,
       "title": "Signal Loss Events/min",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "rate(anomalies_detected_total{type=\"SIGNAL_LOST\"}[1m]) * 60", "legendFormat": "Signal Loss / min", "refId": "A" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "sum(rate(anomalies_detected_total{type=\"SIGNAL_LOST\"}[1m])) * 60",
+          "legendFormat": "Signal Loss / min",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 5,
       "title": "Retry Attempts Over Time",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "rate(retry_attempts_total[1m]) * 60", "legendFormat": "Retries / min", "refId": "A" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "rate(retry_attempts_total[1m]) * 60",
+          "legendFormat": "Retries / min",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 6,
       "title": "DLQ Accumulation Rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
       "targets": [
-        { "expr": "dlq_jobs_total", "legendFormat": "Total DLQ jobs (cumulative)", "refId": "A" },
-        { "expr": "rate(dlq_jobs_total[5m]) * 60", "legendFormat": "DLQ jobs / min", "refId": "B" }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "dlq_jobs_total",
+          "legendFormat": "Total DLQ jobs (cumulative)",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "dfrwje1d63t34b" },
+          "expr": "rate(dlq_jobs_total[1m]) * 60",
+          "legendFormat": "DLQ jobs / min",
+          "refId": "B"
+        }
+      ]
     }
-  ],
-  "__inputs": [
-    { "name": "DS_PROMETHEUS", "label": "Prometheus", "description": "", "type": "datasource", "pluginId": "prometheus", "pluginName": "Prometheus" }
   ]
 }

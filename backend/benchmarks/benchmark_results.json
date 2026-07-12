@@ -30,5 +30,21 @@
     "failed": 0,
     "durationSec": 9.76,
     "eventsPerMin": 61500.6
+  },
+  {
+    "timestamp": "2026-07-12T16:56:58.678Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 12.14,
+    "eventsPerMin": 49411.2
+  },
+  {
+    "timestamp": "2026-07-12T17:27:52.359Z",
+    "numJobs": 10000,
+    "completed": 10000,
+    "failed": 0,
+    "durationSec": 12.2,
+    "eventsPerMin": 49200.5
   }
 ]
