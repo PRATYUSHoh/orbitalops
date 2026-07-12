@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { anomaliesDetectedTotal } = require('../middleware/metrics');
 
 const THRESHOLDS = {
   TEMP_CRITICAL: 90,
@@ -39,6 +40,7 @@ async function checkAnomaly({ satellite_id, temperature, battery, signal_strengt
       { alertId: insertResult.rows[0].id, satellite_id, ...alert },
       { priority: 1 }
     );
+    anomaliesDetectedTotal.inc({ type: alert.type });
 
     console.log(`🚨 Alert queued: ${alert.type} for satellite ${satellite_id}`);
   }
