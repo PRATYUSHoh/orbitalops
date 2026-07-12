@@ -1,0 +1,81 @@
+{
+  "title": "OrbitalOps Monitoring",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Telemetry Ingestion Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(jobs_processed_total[1m]) * 60", "legendFormat": "{{status}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "title": "Job Processing Latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(job_processing_duration_seconds_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(job_processing_duration_seconds_bucket[5m]))", "legendFormat": "p95", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Anomaly Alert Frequency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(anomalies_detected_total[5m]) * 60", "legendFormat": "{{type}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "Signal Loss Events/min",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(anomalies_detected_total{type=\"SIGNAL_LOST\"}[1m]) * 60", "legendFormat": "Signal Loss / min", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Retry Attempts Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(retry_attempts_total[1m]) * 60", "legendFormat": "Retries / min", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "DLQ Accumulation Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "dlq_jobs_total", "legendFormat": "Total DLQ jobs (cumulative)", "refId": "A" },
+        { "expr": "rate(dlq_jobs_total[5m]) * 60", "legendFormat": "DLQ jobs / min", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ],
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "description": "", "type": "datasource", "pluginId": "prometheus", "pluginName": "Prometheus" }
+  ]
+}
