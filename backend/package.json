@@ -2,13 +2,13 @@
   "name": "orbitalops-backend",
   "version": "0.0.1",
   "private": true,
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "migrate:create": "node-pg-migrate create",
-    "migrate:up": "node-pg-migrate up",
-    "migrate:down": "node-pg-migrate down"
-  },
+ "scripts": {
+  "start": "node src/start.js",
+  "dev": "nodemon src/index.js",
+  "migrate:create": "node-pg-migrate create",
+  "migrate:up": "node-pg-migrate up",
+  "migrate:down": "node-pg-migrate down"
+},
   "dependencies": {
     "bullmq": "^5.80.0",
     "dotenv": "^16.4.5",
