@@ -37,3 +37,18 @@ exports.getSatelliteHealth = async (req, res, next) => {
     next(err);
   }
 };
+
+// GET /api/satellites — lightweight list, just enough for the frontend to
+// build real dots instead of inventing fake client-side IDs. Deliberately
+// NOT reusing getSatelliteHealth's heavier query (telemetry/alerts/jobs) —
+// this only needs id/name/orbit_type, called once on page load for all 50.
+exports.listSatellites = async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, orbit_type FROM satellites ORDER BY id ASC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+};
