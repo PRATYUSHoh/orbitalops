@@ -10,9 +10,15 @@ const jobRoute = require('./routes/job.route');
 const alertRoute = require('./routes/alert.route');
 const errorHandler = require('./middleware/errorHandler');
 const { register } = require('./middleware/metrics');
+const cors = require('cors');
 
 const app = express();
-
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ],
+}));
 // Middleware FIRST — must run before any route handles a request
 app.use(morgan('dev'));       // logs every request — method, path, status, response time
 app.use(express.json());      // parses JSON request bodies into req.body

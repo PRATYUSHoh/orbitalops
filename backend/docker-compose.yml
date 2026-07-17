@@ -3,7 +3,7 @@ services:
     build: .
     ports:
       - "3001:3001"
-    env_file: .env
+    env_file: .env.local
     volumes:
       - .:/app
       - /app/node_modules
@@ -29,7 +29,7 @@ services:
   worker:
     build: .
     command: node src/workers/telemetryWorker.js
-    env_file: .env
+    env_file: .env.local
     volumes:
       - .:/app
       - /app/node_modules
@@ -54,8 +54,11 @@ services:
     image: grafana/grafana:latest
     ports:
       - "3000:3000"
+    volumes:
+      - grafanadata:/var/lib/grafana
     depends_on:
       - prometheus
 
 volumes:
   pgdata:
+  grafanadata:
