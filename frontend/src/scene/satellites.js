@@ -31,10 +31,10 @@ export function latLngToXYZ(lat, lng, radius = GLOBE_RADIUS) {
  */
 export function generateSeedSatellites(count = 50) {
   const sats = [];
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5)); // ~137.5°
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
   for (let i = 0; i < count; i++) {
-    const y = 1 - (i / (count - 1)) * 2; // -1..1
+    const y = 1 - (i / (count - 1)) * 2;
     const lat = (Math.asin(y) * 180) / Math.PI;
     const lng = (((goldenAngle * i * 180) / Math.PI) % 360) - 180;
 
@@ -42,11 +42,41 @@ export function generateSeedSatellites(count = 50) {
       id: `SAT-${String(i + 1).padStart(3, '0')}`,
       lat: Number(lat.toFixed(4)),
       lng: Number(lng.toFixed(4)),
-      status: 'normal', // 'normal' | 'anomaly'
+      status: 'normal',
     });
   }
   return sats;
 }
+
+/**
+ * Fetches the REAL satellite list from the backend (id, name, orbit_type)
+ * and lays them out using the same Fibonacci-sphere distribution as before —
+ * positions stay purely cosmetic, but each dot is now keyed by the actual
+ * Postgres id instead of a fake "SAT-001" string. This removes the need for
+ * any id-translation hack elsewhere (e.g. main.js's old modulo mapping),
+ * since incoming Socket.io events' satellite_id now matches dot ids directly.
+ */
+export async function fetchSatellitesWithPositions(apiBaseUrl) {
+  const res = await fetch(`${apiBaseUrl}/api/satellites`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch satellites: ${res.status}`);
+  }
+  const satellites = await res.json(); // [{ id, name, orbit_type }, ...]
+  const count = satellites.length;
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+  return satellites.map((sat, i) => {
+    const y = count === 1 ? 0 : 1 - (i / (count - 1)) * 2;
+    const lat = (Math.asin(y) * 180) / Math.PI;
+    const lng = (((goldenAngle * i * 180) / Math.PI) % 360) - 180;
+
+   return {
+  id: sat.id,
+  name: sat.name,
+  lat: Number(lat.toFixed(4)),
+  lng: Number(lng.toFixed(4)),
+  status: sat.status || 'normal', // real current status from backend
+};
 
 /**
  * Creates one small sphere ("dot") per satellite, positioned on the globe
@@ -60,9 +90,10 @@ export function createSatelliteDots(satellites) {
 
   const dotGeometry = new THREE.SphereGeometry(0.035, 12, 12);
 
-  satellites.forEach((sat) => {
-    const material = new THREE.MeshBasicMaterial({ color: NORMAL_COLOR });
-    const dot = new THREE.Mesh(dotGeometry, material);
+     satellites.forEach((sat) => {
+  const color = sat.status === 'anomaly' ? ANOMALY_COLOR : NORMAL_COLOR;
+  const material = new THREE.MeshBasicMaterial({ color });
+  const dot = new THREE.Mesh(dotGeometry, material);
 
     const pos = latLngToXYZ(sat.lat, sat.lng, GLOBE_RADIUS + DOT_RADIUS_OFFSET);
     dot.position.copy(pos);
