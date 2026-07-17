@@ -243,3 +243,28 @@ html, body {
   z-index: 5;
 }
 .stats-item b { color: var(--r); }
+
+/* ── Demo trigger button ── */
+.demo-trigger-btn {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(0, 229, 160, 0.08);
+  border: 1px solid rgba(0, 229, 160, 0.3);
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s;
+  z-index: 6;
+}
+.demo-trigger-btn:hover:not(:disabled) {
+  background: rgba(0, 229, 160, 0.15);
+}
+.demo-trigger-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

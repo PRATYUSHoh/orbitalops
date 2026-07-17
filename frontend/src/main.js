@@ -92,6 +92,47 @@ renderer.domElement.addEventListener('click', async (event) => {
     showError(satelliteId, err.message);
   }
 });
+// --- Demo trigger button: fires one realistic anomalous event at a random
+// tracked satellite, so you can demo the live pipeline in an interview with
+// a single click — no terminal, no memorized curl command needed. ---
+function createDemoTriggerButton() {
+  const btn = document.createElement('button');
+  btn.id = 'demo-trigger-btn';
+  btn.className = 'demo-trigger-btn';
+  btn.textContent = '⚡ Trigger Demo Anomaly';
+  document.getElementById('app').appendChild(btn);
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    const randomSat = satellites[Math.floor(Math.random() * satellites.length)];
+
+    try {
+      await fetch(`${API_BASE_URL}/api/telemetry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          satellite_id: randomSat.id,
+          temperature: 95,   // > TEMP_CRITICAL (90)
+          battery: 5,        // < BATTERY_LOW (10)
+          signal_strength: -130, // < SIGNAL_LOST (-120)
+        }),
+      });
+      btn.textContent = `✓ Sent to ${randomSat.name}`;
+    } catch (err) {
+      console.error('[demoTrigger] failed', err);
+      btn.textContent = '✕ Failed — check console';
+    }
+
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '⚡ Trigger Demo Anomaly';
+    }, 2000);
+  });
+}
+
+createDemoTriggerButton();
 
 function animate() {
   requestAnimationFrame(animate);
