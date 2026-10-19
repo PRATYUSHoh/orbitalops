@@ -34,13 +34,17 @@ app.get('/metrics', async (req, res) => {
 });
 
 // Static frontend serving
-const distPath = path.resolve(__dirname, '../../dist');
+const localDistPath = path.resolve(__dirname, '../dist');
+const rootDistPath = path.resolve(__dirname, '../../dist');
+const distPath = fs.existsSync(localDistPath) ? localDistPath : rootDistPath;
 const frontendPath = path.resolve(__dirname, '../../frontend');
 
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 }
-app.use(express.static(frontendPath));
+if (fs.existsSync(frontendPath)) {
+  app.use(express.static(frontendPath));
+}
 
 // SPA catch-all fallback
 app.get('*', (req, res, next) => {
