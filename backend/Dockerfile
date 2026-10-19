@@ -2,12 +2,19 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# copy package files first — install layer only rebuilds if these change
+# Copy package definitions
 COPY package*.json ./
+COPY backend/package*.json ./backend/
+
 RUN npm install
+RUN cd backend && npm install
 
 COPY . .
 
-EXPOSE 3001
-CMD ["node", "src/start.js"]
+RUN npm run build
 
+ENV NODE_ENV=production
+ENV PORT=3000
+
+EXPOSE 3000
+CMD ["node", "backend/src/start.js"]
