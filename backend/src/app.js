@@ -34,13 +34,17 @@ app.get('/metrics', async (req, res) => {
 });
 
 // Static frontend serving
+const publicPath = path.resolve(__dirname, '../public');
 const localDistPath = path.resolve(__dirname, '../dist');
 const rootDistPath = path.resolve(__dirname, '../../dist');
-const distPath = fs.existsSync(localDistPath) ? localDistPath : rootDistPath;
 const frontendPath = path.resolve(__dirname, '../../frontend');
 
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+const staticPath = fs.existsSync(publicPath)
+  ? publicPath
+  : (fs.existsSync(localDistPath) ? localDistPath : rootDistPath);
+
+if (fs.existsSync(staticPath)) {
+  app.use(express.static(staticPath));
 }
 if (fs.existsSync(frontendPath)) {
   app.use(express.static(frontendPath));
@@ -57,9 +61,9 @@ app.get('*', (req, res, next) => {
     return next();
   }
 
-  const distIndex = path.join(distPath, 'index.html');
-  if (fs.existsSync(distIndex)) {
-    return res.sendFile(distIndex);
+  const staticIndex = path.join(staticPath, 'index.html');
+  if (fs.existsSync(staticIndex)) {
+    return res.sendFile(staticIndex);
   }
 
   const frontendIndex = path.join(frontendPath, 'index.html');
