@@ -161,8 +161,7 @@ Watch the globe — dots should flash green (or occasionally red, when `temp` ex
 
 ## Grafana dashboard
 
-6 panels, imported via `grafana/orbitalops-dashboard.json`: Telemetry Ingestion Rate, Job Processing Latency (p50/p95), Anomaly Alert Frequency, Signal Loss Events/min, Retry Attempts Over Time, DLQ Accumulation Rate. Confirmed working against live benchmark traffic.
-![alt text](<OrbitalOps Monitoring - Dashboards - Grafana.png>)
+![OrbitalOps Monitoring Dashboard](backend/docs/grafana/dashboard-overview.png)
 ## Known limitations
 
 - In-memory deduplication (100ms time buckets) does not scale across multiple worker instances — noted as a known constraint, not yet solved.

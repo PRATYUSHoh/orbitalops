@@ -1,8 +1,9 @@
-// Express app CONFIGURATION only — no app.listen() here.
-// Why separate from index.js? So tests/health.test.js can require this
-// file and hit it with supertest WITHOUT actually binding a real port.
+const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const morgan = require('morgan');
+const cors = require('cors');
+
 const healthRoute = require('./routes/health.route');
 const telemetryRoute = require('./routes/telemetry.route');
 const satelliteRoute = require('./routes/satellite.route');
@@ -10,20 +11,17 @@ const jobRoute = require('./routes/job.route');
 const alertRoute = require('./routes/alert.route');
 const errorHandler = require('./middleware/errorHandler');
 const { register } = require('./middleware/metrics');
-const cors = require('cors');
 
 const app = express();
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-  ],
-}));
-// Middleware FIRST — must run before any route handles a request
-app.use(morgan('dev'));       // logs every request — method, path, status, response time
-app.use(express.json());      // parses JSON request bodies into req.body
 
-// Routes
+// Enable CORS for all origins in AI Studio iframe environment
+app.use(cors());
+
+// Middleware FIRST
+app.use(morgan('dev'));
+app.use(express.json());
+
+// API Routes
 app.use('/health', healthRoute);
 app.use('/api/telemetry', telemetryRoute);
 app.use('/api/satellites', satelliteRoute);
@@ -35,7 +33,40 @@ app.get('/metrics', async (req, res) => {
   res.end(await register.metrics());
 });
 
-// Error handler MUST be last — after all routes are registered
+// Static frontend serving
+const distPath = path.resolve(__dirname, '../../dist');
+const frontendPath = path.resolve(__dirname, '../../frontend');
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+app.use(express.static(frontendPath));
+
+// SPA catch-all fallback
+app.get('*', (req, res, next) => {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/metrics') ||
+    req.path.startsWith('/socket.io')
+  ) {
+    return next();
+  }
+
+  const distIndex = path.join(distPath, 'index.html');
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
+
+  const frontendIndex = path.join(frontendPath, 'index.html');
+  if (fs.existsSync(frontendIndex)) {
+    return res.sendFile(frontendIndex);
+  }
+
+  next();
+});
+
+// Error handler MUST be last
 app.use(errorHandler);
 
 module.exports = app;

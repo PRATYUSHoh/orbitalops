@@ -26,7 +26,12 @@ metricsApp.get('/metrics', async (req, res) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
 });
-metricsApp.listen(3002, () => console.log('Worker metrics server listening on :3002'));
+try {
+  metricsApp.listen(3002, () => console.log('Worker metrics server listening on :3002'))
+    .on('error', (err) => console.warn('[worker] Metrics port 3002 not available, skipping:', err.message));
+} catch (err) {
+  console.warn('[worker] Metrics server init skipped:', err.message);
+}
 
 const { getRedisConnection } = require('../config/redisConnection');
 const connection = getRedisConnection();

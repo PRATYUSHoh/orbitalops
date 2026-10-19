@@ -1,5 +1,5 @@
 export function connectLiveData({ apiBaseUrl, onEvent, onConnectionChange }) {
-  const socket = io(apiBaseUrl, {
+  const socket = io(apiBaseUrl || undefined, {
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,

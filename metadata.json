@@ -1,0 +1,6 @@
+{
+  "name": "OrbitalOps — Satellite Globe",
+  "description": "Satellite telemetry event processing engine with fault-tolerant job queuing, anomaly detection, real-time 3D globe visualization, and observability.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
