@@ -1,7 +1,7 @@
 # OrbitalOps
 
 Satellite telemetry event processing engine with fault-tolerant job queuing, anomaly detection, real-time visualization, and full observability — built as a backend systems portfolio project.
-
+https://orbitalops.onrender.com/
 ## What it does
 
 OrbitalOps ingests satellite telemetry events (temperature, battery, signal strength) through a queue-backed pipeline that detects anomalies, retries transient failures, and routes permanently failed events to a dead-letter queue. It exposes REST APIs for satellite health, job status, and alert history, broadcasts processed events live to a 3D globe visualization, and provides full Prometheus/Grafana observability into queue depth, processing latency, and failure rates.
