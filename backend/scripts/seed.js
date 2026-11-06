@@ -19,6 +19,15 @@
 const { faker } = require('@faker-js/faker');
 const pool = require('../src/config/db'); // adjust path if run from a different location
 
+// Support deterministic generation via SEED environment variable
+if (process.env.SEED) {
+  const seedNum = parseInt(process.env.SEED, 10);
+  if (!isNaN(seedNum)) {
+    faker.seed(seedNum);
+    console.log(`[seed] Using deterministic seed: ${seedNum}`);
+  }
+}
+
 const NUM_SATELLITES = 50;
 const NUM_TELEMETRY_EVENTS = 100_000;
 const BATCH_SIZE = 1000;

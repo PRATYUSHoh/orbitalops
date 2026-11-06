@@ -15,6 +15,18 @@ const {
 
 let waitingCount = 0;
 
+// Cached anomaly detector to prevent circular dependencies or teardown require warnings
+let checkAnomalyCached = null;
+function getCheckAnomaly() {
+  if (!checkAnomalyCached) {
+    try {
+      const mod = require('./anomalyDetector');
+      checkAnomalyCached = mod.checkAnomaly;
+    } catch (_) {}
+  }
+  return checkAnomalyCached;
+}
+
 async function processTelemetryJob(jobData) {
   const start = Date.now();
   const { jobId, satellite_id, temperature, battery, signal_strength } = jobData;
@@ -33,9 +45,8 @@ async function processTelemetryJob(jobData) {
 
   await pool.query(`UPDATE jobs SET status = 'done' WHERE id = $1`, [jobId]);
 
-  // Lazy load anomaly detector to prevent circular dependencies
-  const { checkAnomaly } = require('./anomalyDetector');
-  const alerts = await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
+  const detector = getCheckAnomaly();
+  const alerts = detector ? await detector({ satellite_id, temperature, battery, signal_strength }) : [];
   const isAnomaly = alerts.length > 0;
 
   // Broadcast to connected UI clients

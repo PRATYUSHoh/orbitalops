@@ -25,13 +25,26 @@ const NUM_JOBS = 10_000;
 const BATCH_SIZE = 1000;
 const RESULTS_FILE = path.join(__dirname, 'benchmark_results.json');
 
+// Pseudo-random linear congruential generator for reproducible benchmark workloads
+let prngState = process.env.SEED ? parseInt(process.env.SEED, 10) : null;
+function getDeterministicRandom() {
+  if (prngState === null) return Math.random();
+  prngState = (prngState * 1664525 + 1013904223) % 4294967296;
+  return prngState / 4294967296;
+}
+
+if (process.env.SEED) {
+  console.log(`[benchmark] Using deterministic random seed: ${process.env.SEED}`);
+}
+
 function randomTelemetryValues() {
   // Nominal-range values — this benchmark measures throughput, not
   // anomaly detection correctness, so we keep readings mostly normal.
+  const rng = getDeterministicRandom;
   return {
-    temperature: +(20 + Math.random() * 40).toFixed(1),
-    battery: +(40 + Math.random() * 60).toFixed(1),
-    signal_strength: +(-90 + Math.random() * 50).toFixed(1),
+    temperature: +(20 + rng() * 40).toFixed(1),
+    battery: +(40 + rng() * 60).toFixed(1),
+    signal_strength: +(-90 + rng() * 50).toFixed(1),
   };
 }
 

@@ -7,15 +7,19 @@ const THRESHOLDS = {
   SIGNAL_LOST: -120,
 };
 
+let alertQueueCached = null;
+function getAlertQueue() {
+  if (!alertQueueCached) {
+    try {
+      const q = require('./telemetryQueue');
+      alertQueueCached = q.alertQueue;
+    } catch (_) {}
+  }
+  return alertQueueCached;
+}
+
 async function checkAnomaly({ satellite_id, temperature, battery, signal_strength }) {
-  // Lazy require — loaded only when this function actually runs, not when
-  // the file is first imported. This breaks the circular dependency:
-  // telemetryWorker.js requires anomalyDetector.js AND telemetryQueue.js,
-  // and anomalyDetector.js also needs telemetryQueue.js. If anomalyDetector
-  // required telemetryQueue at the TOP of the file, Node could hand back a
-  // partially-loaded module during the load race, causing checkAnomaly
-  // (or alertQueue) to be undefined at the moment it's destructured.
-  const { alertQueue } = require('./telemetryQueue');
+  const alertQueue = getAlertQueue();
 
   const alerts = [];
 

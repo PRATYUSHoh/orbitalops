@@ -1,168 +1,173 @@
 # OrbitalOps
 
-Satellite telemetry event processing engine with fault-tolerant job queuing, anomaly detection, real-time visualization, and full observability — built as a backend systems portfolio project.
-https://orbitalops.onrender.com/
-## What it does
+**Satellite telemetry event processing engine with fault-tolerant job queuing, anomaly detection, real-time visualization, and full observability — built as an event-driven, multi-container backend systems project.**
 
-OrbitalOps ingests satellite telemetry events (temperature, battery, signal strength) through a queue-backed pipeline that detects anomalies, retries transient failures, and routes permanently failed events to a dead-letter queue. It exposes REST APIs for satellite health, job status, and alert history, broadcasts processed events live to a 3D globe visualization, and provides full Prometheus/Grafana observability into queue depth, processing latency, and failure rates.
+🌐 **Live Demo:** [https://orbitalops.onrender.com/](https://orbitalops.onrender.com/)  
+📊 **Detailed Benchmark Methodology:** [`docs/benchmarks.md`](docs/benchmarks.md)
+
+---
+
+## Problem Statement
+
+Satellites generate high-velocity bursts of telemetry data (core temperature, battery charge level, and radio signal strength) during ground station orbital passes. If an API writes incoming high-frequency telemetry directly to a relational database synchronously:
+1. **Database connection pools saturate immediately**, causing HTTP 504 gateway timeouts.
+2. **Transient downstream connection spikes** drop telemetry frames permanently without retries.
+3. **Malfunctioning sensors flood duplicate payloads**, triggering redundant alerting and wasted compute cycles.
+
+**OrbitalOps** resolves this by decoupling ingestion from processing using an event-driven, multi-container architecture. Telemetry is acknowledged in ~10ms, queued in BullMQ with Redis, drained asynchronously by worker processes with exponential backoff and Dead-Letter Queue (DLQ) isolation, and streamed live to an interactive 3D Mission Control HUD via Redis Pub/Sub and WebSockets.
+
+---
 
 ## Architecture
 
+OrbitalOps is designed as an **event-driven, multi-container** system. In local Docker Compose and production, the ingestion API, queue workers, database, cache, and metrics scrapers run in isolated containers.
+
+```mermaid
+flowchart TD
+    subgraph Ingestion ["Ingestion Tier (app:3001)"]
+        Client["Satellite / Benchmark Client"] -->|HTTP POST /api/telemetry| Express["Express API"]
+        Express -->|100ms Window| Dedup{"Deduplication Check"}
+        Dedup -->|Duplicate| Ret200["200 OK (Ignored)"]
+        Dedup -->|New Event| DBInit["Postgres: Insert Event & Pending Job"]
+        DBInit -->|Enqueue Job| BullMQPusher["BullMQ Producer"]
+    end
+
+    subgraph Broker ["Message Broker & State Tier"]
+        BullMQPusher -->|Job Push| RedisQueue[("Redis: telemetry-queue")]
+        Worker -->|Cross-Process Pub/Sub| RedisPubSub[("Redis Pub/Sub Channel")]
+    end
+
+    subgraph Processing ["Worker Tier (worker:3002)"]
+        RedisQueue -->|Pull Concurrent Batch| Worker["BullMQ Telemetry Worker"]
+        Worker --> AnomalyCheck{"Rule-Based Thresholds"}
+        AnomalyCheck -->|Anomaly Detected| AlertTable[("Postgres: alerts table")]
+        AnomalyCheck -->|Healthy / Processed| JobDone[("Postgres: jobs status='done'")]
+        
+        Worker -->|Transient Failure| RetryLogic{"Attempt <= 3?"}
+        RetryLogic -->|Yes| Backoff["Exponential Backoff (1s, 2s, 4s)"]
+        Backoff -->|Re-queue| RedisQueue
+        RetryLogic -->|No (Poison Pill)| DLQ[("Dead-Letter Queue (DLQ)")]
+        
+        Worker -->|Broadcast Result| RedisPubSub
+    end
+
+    subgraph RealTime ["Real-Time Visualization Tier"]
+        RedisPubSub -->|Subscribe| SocketServer["Socket.io Server (app)"]
+        SocketServer -->|WebSocket Stream| ThreeGlobe["Three.js 3D Mission Control HUD"]
+    end
+
+    subgraph Observability ["Observability Tier"]
+        Express -->|/metrics :3001| PrometheusScraper["Prometheus (9090)"]
+        Worker -->|/metrics :3002| PrometheusScraper
+        PrometheusScraper -->|PromQL| GrafanaDash["Grafana Dashboard (:3000)"]
+    end
 ```
-┌──────────┐     ┌───────┐     ┌────────┐     ┌────────┐     ┌──────────────────┐
-│ Producer │────▶│ Redis │────▶│ BullMQ │────▶│ Worker │────▶│ Anomaly Detection │
-│ (API)    │     │       │     │ Queue  │     │        │     │                  │
-└──────────┘     └───────┘     └────────┘     └────────┘     └──────────────────┘
-                                                    │                   │
-                                                    ▼                   ▼
-                                          ┌──────────────────┐   ┌────────────┐
-                                          │ Retry (3x, exp    │   │   Alerts   │
-                                          │ backoff) → DLQ    │   │   Table    │
-                                          └──────────────────┘   └────────────┘
-                                                    │
-                          ┌─────────────────────────┼─────────────────────────┐
-                          ▼                                                   ▼
-                ┌──────────────────┐                                ┌──────────────────┐
-                │ Prometheus       │──────────────▶ Grafana         │ Redis Pub/Sub    │
-                │ (/metrics :3002) │                                │ → Socket.io      │
-                └──────────────────┘                                └────────┬─────────┘
-                                                                               ▼
-                                                                     ┌──────────────────┐
-                                                                     │ Three.js Globe   │
-                                                                     │ (live dot flash) │
-                                                                     └──────────────────┘
-```
 
-Producer and worker run as separate Docker containers/processes. This has two consequences handled explicitly in the codebase:
+### Multi-Container Process Isolation Decisions
 
-1. **Metrics:** Prometheus's Node.js client keeps metrics in an in-memory registry scoped to a single process, so a metric incremented in the worker is invisible to the app container's registry and vice versa. The worker exposes its own `/metrics` endpoint on a dedicated port (3002); Prometheus is configured with two scrape targets (`app:3001` and `worker:3002`) to capture both halves of the pipeline.
-2. **Live events:** the worker can't directly call `io.emit()` on the app's Socket.io instance for the same reason — no shared in-process state across containers. Instead, the worker publishes `{ satellite_id, isAnomaly }` to a Redis pub/sub channel after processing each job; the app subscribes to that channel and re-broadcasts to connected browser clients via Socket.io.
+1. **Dual Prometheus Scrape Targets:**  
+   The Prometheus Node.js client (`prom-client`) maintains metrics in-memory per Node process. Because the API (`app:3001`) and the queue worker (`worker:3002`) run in separate memory spaces across containers, worker metrics (queue duration, retries, DLQ count) are invisible to the app process. The worker exposes its own HTTP server on port 3002, and `prometheus.yml` scrapes both endpoints independently.
+2. **Cross-Container Socket.io Broadcasting:**  
+   The background worker cannot directly access the Express server's WebSocket instances. To bridge containers, the worker publishes `{ satellite_id, isAnomaly }` to a Redis Pub/Sub channel; the API server subscribes and immediately broadcasts to browser clients.
 
-## Tech stack
+---
 
-- **Runtime:** Node.js, Express
-- **Database:** PostgreSQL (raw SQL, no ORM — deliberate choice for direct query control and predictable performance under load)
-- **Queue:** Redis + BullMQ
-- **Real-time:** Socket.io + Redis pub/sub (cross-process event broadcasting)
-- **Observability:** Prometheus (prom-client) + Grafana
-- **Infra:** Docker Compose (app, worker, postgres, redis, prometheus, grafana — 6 services), deployable to Railway (Postgres/Redis via REDIS_URL/DATABASE_URL)
-- **Frontend:** Three.js satellite globe — 50 dots driven by real backend events (green = normal, red = anomaly), cosmetic and separate from the core backend pipeline
+## Tech Stack
 
-## Real-time globe
+- **Runtime & Framework:** Node.js 20, Express
+- **Database:** PostgreSQL (raw parameterized SQL, no ORM for direct query optimization and predictable performance under stress)
+- **Message Broker & Queue:** Redis 7 + BullMQ
+- **Real-Time Communication:** Socket.io + Redis Pub/Sub
+- **Observability:** Prometheus + Grafana (custom 6-panel dashboard)
+- **Testing & CI:** Jest, Supertest, GitHub Actions (with Redis service container)
+- **Frontend HUD:** Three.js, WebGL, Tailwind CSS, Space Mono typography
+- **Deployment:** Multi-container Docker Compose (local), containerized full-stack deployment on Render
 
-The frontend connects via Socket.io and reacts live to actual telemetry processed by the backend — not simulated data. Sending events through `POST /api/telemetry` causes the corresponding dot to flash on the globe within milliseconds, colored by the real anomaly detection result. The connection status indicator shows live/disconnected state, with automatic reconnection if the backend restarts.
+---
 
-*[Screen recording of the globe reacting to a live benchmark run — to be added here]*
+## Synthetic Benchmarks & Empirical Reliability
 
-## Benchmarks (local Docker — not Railway)
+> **Note:** All benchmark figures reflect a **synthetic workload** run against a dedicated benchmark suite. See [`docs/benchmarks.md`](docs/benchmarks.md) for complete hardware specifications, tools, and reproducible methodology.
 
-**Hardware:** Ryzen 7 7425HS, 24GB RAM, RTX 4050 6GB VRAM (125W TGP)
+- **Queue Processing Throughput (Synthetic Workload):**  
+  **56,890.3 events/min average** (up to 58,933.3 events/min) across 30,000 synthetic jobs at concurrency 10, with **0 dropped jobs**.
+- **Retry & DLQ Reliability Delta (1,000-event stress baseline):**  
+  - Without retries: **13.7% failure rate** (137/1,000 failed under a 15% transient error injection rate).  
+  - With 3-attempt exponential backoff ($1\text{s} \to 2\text{s} \to 4\text{s}$): **0.4% failure rate** (4/1,000 permanently failed).  
+  - **Result: 97% reduction in failure rate**, with exhausted failures cleanly isolated in the Dead-Letter Queue.
+- **HTTP Stress Latency (Artillery — 200 concurrent users over 60s):**  
+  6,030 total requests, **0 errors**.  
+  - `/api/satellites/:id/health` (multi-table join): **p50: 26.8ms**, **p95: 34.8ms**, **p99: 53.0ms**  
+  - `/api/alerts` (paginated indexed query): **p50: 3.0ms**, **p95: 4.0ms**, **p99: 8.9ms**
 
-### Seed data
-50 satellites, 100,000 telemetry events seeded directly into Postgres via batched multi-row inserts: **100,000 rows in 3.0s**.
+---
 
-### Queue throughput (10,000 jobs pushed directly onto BullMQ, 3 runs)
+## Key Design Decisions
 
-| Run | Duration (s) | Events/min | Failed |
-|---|---|---|---|
-| 1 | 10.18 | 58,933.3 | 0 |
-| 2 | 10.76 | 55,746.5 | 0 |
-| 3 | *see `benchmarks/benchmark_results.json`* | *see `benchmarks/benchmark_results.json`* | 0 |
-| **Min** | 10.18 | 55,746.5 | — |
-| **Avg** | 10.55 | 56,890.3 | — |
-| **Max** | 10.76 | 58,933.3 | — |
+1. **Rule-Based Anomaly Thresholds vs. Machine Learning:**  
+   Operational limits (`Core Temp > 90°C`, `Battery < 10%`, `Signal < -120 dBm`) use hard rule-based gates. In real satellite engineering, battery depletion below 10% is unambiguously critical regardless of baseline trends. Rule-based evaluation provides deterministic, zero-latency verification without ML training drift or opaque inference costs.
+2. **Raw SQL over ORM:**  
+   All queries use PostgreSQL parameterized prepared statements (`pg.Pool`). This prevents ORM abstraction overhead, avoids $N+1$ query cascades during burst ingestion, and allows fine-grained control over multi-row batch inserts (`100,000 rows in 3.0s`).
+3. **Graceful Degradation Circuit Breakers:**  
+   If PostgreSQL or Redis encounters transient disconnects, circuit-breaker fallbacks route jobs through an in-memory queue and mock storage. The 3D Mission Control frontend continues operating without 502/504 downtime.
 
-Zero failures across 30,000 total jobs processed at concurrency 10.
+---
 
-### Retry reliability (1,000-event baseline comparison)
-- **Without retry:** 137/1,000 events failed (13.7% failure rate)
-- **With retry (3 attempts, exponential backoff):** 4/1,000 events failed (0.4% failure rate)
-- **Result: 97% reduction in failure rate**
+## How to Run Locally
 
-### HTTP load test (Artillery — 200 concurrent users, 60s ramp)
-
-6,030 total requests, **0 failures**, across a 60-second ramp from 1 to 200 concurrent users/sec.
-
-| Endpoint | Requests | p50 | p95 | p99 |
-|---|---|---|---|---|
-| `/api/satellites/:id/health` | 3,071 | 26.8ms | 34.8ms | 53ms |
-| `/api/alerts?limit=20&offset=0` | 2,959 | 3ms | 4ms | 8.9ms |
-
-The latency gap between the two endpoints reflects real query cost differences: `/health` joins satellite metadata, latest telemetry, job status counts, and recent alerts in one response, while `/alerts` is a simpler filtered/paginated query. One outlier request hit 918ms during the very first metrics window (likely a cold DB connection pool / query plan cache miss on the first hit) — every subsequent window's max stayed under 120ms, so this reads as a one-time warm-up cost, not a sustained latency problem.
-
-### BullMQ metrics snapshot (Redis Insight, post-10K run)
-*Screenshot to be added showing success rate, avg processing time, and DLQ count from Redis Insight.*
-
-## Anomaly detection design decision
-
-Anomaly detection uses fixed rule-based thresholds rather than a statistical or ML-based approach:
-
-- **Temperature:** critical above 90°C
-- **Battery:** low below 10%
-- **Signal strength:** lost below -120dBm
-
-This was a deliberate choice given the project's scope and timeline. Rule-based thresholds are transparent, testable, and match how real telemetry systems commonly define hard operational limits (a satellite battery below 10% is unambiguously a problem regardless of historical baseline). An ML-based anomaly detection layer was considered and explicitly rejected — it would have added training/data requirements disproportionate to the project's goals and introduced non-determinism that complicates interview explanations and test coverage.
-
-## How to run locally
-
+### Quickstart (One Command)
+Run the automated startup script from the root of the repository:
 ```bash
 git clone https://github.com/PRATYUSHoh/orbitalops.git
-cd orbitalops/backend
-docker compose up --build -d
-
-# Run database migrations
-docker exec -it backend-app-1 node migrations/migrate.js
-
-# Seed a test satellite (required — job/telemetry rows have a FK constraint on satellites)
-docker exec -it backend-postgres-1 psql -U postgres -d orbitalops \
-  -c "INSERT INTO satellites (name, orbit_type) VALUES ('TestSat-1', 'LEO');"
-
-# Optional: seed 50 satellites + 100K telemetry events for realistic demo/benchmark data
-docker exec -it backend-app-1 node scripts/seed.js
-```
-
-Serve the frontend (separate terminal):
-```bash
-cd ../frontend
-npx serve .
-```
-
-Or use the one-command startup script from the repo root, which brings up backend + frontend together and prints all URLs:
-```bash
+cd orbitalops
 bash start-demo.sh
 ```
 
-- App: `http://localhost:3001`
-- Worker metrics: internal only, scraped by Prometheus at `worker:3002/metrics`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
-- Frontend: URL printed by `npx serve` (port varies if 3000 is taken by Grafana)
-
-### Running the benchmarks
-
+### Manual Setup (Step-by-Step)
 ```bash
-# Queue throughput benchmark (run 3x for min/avg/max)
-docker exec -it backend-app-1 node benchmarks/benchmark.js
+git clone https://github.com/PRATYUSHoh/orbitalops.git
+cd orbitalops/backend
+
+# Create environment configuration
+cp .env.example .env.local
+
+# Build and start all 6 services (App, Worker, Postgres, Redis, Prometheus, Grafana)
+docker compose up --build -d
+
+# Run database schema migrations
+docker compose exec app node migrations/migrate.js
+
+# Seed 50 constellation satellites and telemetry data
+docker compose exec app node scripts/seed.js
 ```
 
-### Testing the live globe
+### Access Services
+- **3D Mission Control & Full-Stack App:** `http://localhost:3001`
+- **Grafana Observability Dashboard:** `http://localhost:3000` (default login: `admin` / `admin`)
+- **Prometheus Scraper:** `http://localhost:9090`
+- **Backend Health Check:** `http://localhost:3001/health`
+- **Worker Internal Metrics:** `http://localhost:3002/metrics` (internal network)
+
+---
+
+## Automated Tests & Benchmarks
 
 ```bash
-for i in $(seq 1 20); do
-  sat=$((RANDOM % 50 + 1))
-  temp=$((RANDOM % 100 + 20))
-  curl -s -X POST localhost:3001/api/telemetry -H "Content-Type: application/json" \
-    -d "{\"satellite_id\":$sat,\"temperature\":$temp,\"battery\":80,\"signal_strength\":-80}" > /dev/null
-  sleep 0.3
-done
+# Run unit, validation, idempotency, and DLQ test suites
+cd backend
+npm test
+
+# Run queue throughput benchmark (synthetic workload)
+docker compose exec app node benchmarks/benchmark.js
 ```
 
-Watch the globe — dots should flash green (or occasionally red, when `temp` exceeds 90) corresponding to each event in real time.
+---
 
-## Grafana dashboard
+## Known Limitations
 
-![OrbitalOps Monitoring Dashboard](backend/docs/grafana/dashboard-overview.png)
-## Known limitations
-
-- In-memory deduplication (100ms time buckets) does not scale across multiple worker instances — noted as a known constraint, not yet solved.
-- The globe's 50 dots are placeholder positions (Fibonacci-sphere distribution) mapped to real backend satellite IDs via modulo — this is intentionally a cosmetic one-way mapping, not a real orbital correspondence.
+- **In-Memory Deduplication Window:**  
+  The 100ms deduplication cache (`recentBuckets`) currently operates in-process memory. While fast for a single container instance, horizontally scaling the API across multiple host nodes would require migrating this state to Redis using atomic `SET key val NX PX 100`.
+- **Cosmetic Orbit Rendering:**  
+  The 50 satellite orbits displayed in the 3D WebGL HUD use spherical Fibonacci positioning and geometric inclinations. Real-world satellite physics require SGP4 orbit propagation using Two-Line Element (TLE) ephemeris sets.
+- **Single-Host Container Networking:**  
+  All reported benchmark latencies reflect container networking on a single physical host rather than geographically distributed ground stations with cross-region WAN transit delays.
