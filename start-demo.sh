@@ -16,6 +16,7 @@ if [ ! -f .env.local ]; then
   cat <<EOF > .env.local
 PORT=3001
 NODE_ENV=development
+DATABASE_URL=postgres://postgres:password@postgres:5432/orbitalops
 POSTGRES_DB=orbitalops
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
