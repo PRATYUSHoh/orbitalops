@@ -6,6 +6,8 @@ const circuitBreaker = require('../services/circuitBreaker');
 const { createPublisher } = require('../services/socketPubSub');
 const publisher = createPublisher();
 const { telemetryDLQ, telemetryQueue } = require('../services/telemetryQueue');
+const { getRedisConnection, isRedisConfigured } = require('../config/redisConnection');
+const redisClient = require('../config/redis');
 const {
   register,
   jobsProcessedTotal,
@@ -33,96 +35,126 @@ try {
   console.warn('[worker] Metrics server init skipped:', err.message);
 }
 
-const { getRedisConnection } = require('../config/redisConnection');
-const connection = getRedisConnection();
-
 const FORCE_FAILURE_RATE = process.env.FORCE_FAILURE_RATE
   ? parseFloat(process.env.FORCE_FAILURE_RATE)
   : 0;
 
-const worker = new Worker(
-  'telemetry-queue',
-  async (job) => {
-    const start = Date.now();
-    const { jobId, satellite_id, temperature, battery, signal_strength } = job.data;
+let worker = null;
+let alertWorker = null;
 
-    if (circuitBreaker.isOpen()) {
-      throw new Error('Circuit breaker open — DB unhealthy, pausing processing');
-    }
+async function startWorkers() {
+  if (!isRedisConfigured()) {
+    console.log('[worker] Redis not configured — BullMQ workers inactive (API in-process queue handles jobs)');
+    return;
+  }
 
+  const ready = await redisClient.waitForRedisReady();
+  const connection = getRedisConnection();
+
+  if (!ready || !connection) {
+    console.warn('[worker] Redis unreachable — BullMQ workers paused (API using in-memory fallback)');
+    return;
+  }
+
+  worker = new Worker(
+    'telemetry-queue',
+    async (job) => {
+      const start = Date.now();
+      const { jobId, satellite_id, temperature, battery, signal_strength } = job.data;
+
+      if (circuitBreaker.isOpen()) {
+        throw new Error('Circuit breaker open — DB unhealthy, pausing processing');
+      }
+
+      try {
+        await pool.query(`UPDATE jobs SET status = 'processing' WHERE id = $1`, [jobId]);
+        circuitBreaker.recordSuccess();
+      } catch (err) {
+        circuitBreaker.recordError();
+        throw err;
+      }
+
+      if (FORCE_FAILURE_RATE > 0 && Math.random() < FORCE_FAILURE_RATE) {
+        throw new Error('Injected test failure');
+      }
+
+      await pool.query(`UPDATE jobs SET status = 'done' WHERE id = $1`, [jobId]);
+
+      // checkAnomaly returns the array of alerts fired for this event —
+      // reuse that to derive isAnomaly instead of calling detection logic twice.
+      const alerts = await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
+      const isAnomaly = alerts.length > 0;
+
+      // Publish to Redis — the app container's Socket.io server is subscribed
+      // to this channel and will re-broadcast to connected browser clients.
+      publisher.publish({ satellite_id, isAnomaly });
+
+      const durationMs = Date.now() - start;
+      jobsProcessedTotal.inc({ status: 'done' });
+      jobProcessingDuration.observe(durationMs / 1000);
+
+      console.log(`Job ${job.id} (db job ${jobId}) done in ${durationMs}ms`);
+    },
+    { connection, concurrency: 10 }
+  );
+
+  alertWorker = new Worker(
+    'alert-queue',
+    async (job) => {
+      console.log(`🔔 Processing alert job ${job.id}:`, job.data.type, 'for satellite', job.data.satellite_id);
+    },
+    { connection, concurrency: 5 }
+  );
+
+  worker.on('error', (err) => {
+    console.warn('[worker:telemetry] BullMQ worker error:', err.message);
+  });
+
+  alertWorker.on('error', (err) => {
+    console.warn('[worker:alert] BullMQ worker error:', err.message);
+  });
+
+  // Poll queue depth every 5 seconds and update the gauge
+  setInterval(async () => {
     try {
-      await pool.query(`UPDATE jobs SET status = 'processing' WHERE id = $1`, [jobId]);
-      circuitBreaker.recordSuccess();
+      const waiting = await telemetryQueue.getWaitingCount();
+      queueDepth.set(waiting);
     } catch (err) {
-      circuitBreaker.recordError();
-      throw err;
+      console.error('Failed to poll queue depth:', err.message);
+    }
+  }, 5000);
+
+  worker.on('failed', async (job, err) => {
+    console.error(`Job ${job?.id} failed permanently:`, err.message);
+    const { jobId } = job?.data || {};
+
+    if (jobId) {
+      try {
+        await pool.query(
+          `UPDATE jobs SET status = 'failed', retries = retries + 1 WHERE id = $1`,
+          [jobId]
+        );
+      } catch (dbErr) {
+        circuitBreaker.recordError();
+      }
     }
 
-    if (FORCE_FAILURE_RATE > 0 && Math.random() < FORCE_FAILURE_RATE) {
-      throw new Error('Injected test failure');
+    jobsProcessedTotal.inc({ status: 'failed' });
+    retryAttemptsTotal.inc();
+
+    const maxAttempts = job?.opts?.attempts || 1;
+    if (job && job.attemptsMade >= maxAttempts) {
+      await telemetryDLQ.add('dead-letter', { ...job.data, failedReason: err.message });
+      dlqJobsTotal.inc();
+      console.log(`💀 Job ${job.id} moved to DLQ`);
     }
+  });
 
-    await pool.query(`UPDATE jobs SET status = 'done' WHERE id = $1`, [jobId]);
+  console.log('Telemetry worker + alert worker started');
+}
 
-    // checkAnomaly returns the array of alerts fired for this event —
-    // reuse that to derive isAnomaly instead of calling detection logic twice.
-    const alerts = await checkAnomaly({ satellite_id, temperature, battery, signal_strength });
-    const isAnomaly = alerts.length > 0;
-
-    // Publish to Redis — the app container's Socket.io server is subscribed
-    // to this channel and will re-broadcast to connected browser clients.
-    publisher.publish({ satellite_id, isAnomaly });
-
-    const durationMs = Date.now() - start;
-    jobsProcessedTotal.inc({ status: 'done' });
-    jobProcessingDuration.observe(durationMs / 1000);
-
-    console.log(`Job ${job.id} (db job ${jobId}) done in ${durationMs}ms`);
-  },
-  { connection, concurrency: 10 }
-);
-
-const alertWorker = new Worker(
-  'alert-queue',
-  async (job) => {
-    console.log(`🔔 Processing alert job ${job.id}:`, job.data.type, 'for satellite', job.data.satellite_id);
-  },
-  { connection, concurrency: 5 }
-);
-
-// Poll queue depth every 5 seconds and update the gauge
-setInterval(async () => {
-  try {
-    const waiting = await telemetryQueue.getWaitingCount();
-    queueDepth.set(waiting);
-  } catch (err) {
-    console.error('Failed to poll queue depth:', err.message);
-  }
-}, 5000);
-
-worker.on('failed', async (job, err) => {
-  console.error(`Job ${job.id} failed permanently:`, err.message);
-  const { jobId } = job.data;
-
-  try {
-    await pool.query(
-      `UPDATE jobs SET status = 'failed', retries = retries + 1 WHERE id = $1`,
-      [jobId]
-    );
-  } catch (dbErr) {
-    circuitBreaker.recordError();
-  }
-
-  jobsProcessedTotal.inc({ status: 'failed' });
-  retryAttemptsTotal.inc();
-
-  if (job.attemptsMade >= job.opts.attempts) {
-    await telemetryDLQ.add('dead-letter', { ...job.data, failedReason: err.message });
-    dlqJobsTotal.inc();
-    console.log(`💀 Job ${job.id} moved to DLQ`);
-  }
+startWorkers().catch((err) => {
+  console.warn('[worker] Startup error, continuing safely:', err.message);
 });
 
-console.log('Telemetry worker + alert worker started');
-
-module.exports = { worker, alertWorker };
+module.exports = { getWorker: () => worker, getAlertWorker: () => alertWorker };

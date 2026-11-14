@@ -1,9 +1,10 @@
 // Redis client configuration with in-memory fallback.
-// In AI Studio environment without external Redis, provides in-memory Map stub
-// per Phase 2.2 of the web migration reference.
+// Connects to real Redis via ioredis when REDIS_URL (redis:// or rediss://)
+// or REDIS_HOST is configured and reachable; otherwise seamlessly falls back
+// to an in-memory Map stub.
 
 const Redis = require('ioredis');
-const { getRedisConnection } = require('./redisConnection');
+const { getRedisConnection, isRedisConfigured } = require('./redisConnection');
 
 const store = new Map();
 const inMemoryRedis = {
@@ -21,8 +22,9 @@ const inMemoryRedis = {
 };
 
 let client = null;
+let readyPromise = Promise.resolve(false);
 
-if (process.env.REDIS_URL || process.env.REDIS_HOST) {
+if (isRedisConfigured()) {
   try {
     const connConfig = getRedisConnection();
     client = new Redis({
@@ -30,6 +32,32 @@ if (process.env.REDIS_URL || process.env.REDIS_HOST) {
       maxRetriesPerRequest: 1,
       connectTimeout: 2000,
       retryStrategy: () => null, // don't loop endlessly if unreachable
+    });
+
+    readyPromise = new Promise((resolve) => {
+      const onReady = () => {
+        cleanup();
+        resolve(true);
+      };
+      const onFail = () => {
+        cleanup();
+        resolve(false);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(client?.status === 'ready');
+      }, 1500);
+
+      function cleanup() {
+        clearTimeout(timer);
+        client?.off('ready', onReady);
+        client?.off('error', onFail);
+        client?.off('end', onFail);
+      }
+
+      client.once('ready', onReady);
+      client.once('error', onFail);
+      client.once('end', onFail);
     });
 
     client.on('error', (err) => {
@@ -41,8 +69,21 @@ if (process.env.REDIS_URL || process.env.REDIS_HOST) {
   }
 }
 
+async function waitForRedisReady() {
+  if (!client) return false;
+  if (client.status === 'ready') return true;
+  if (client.status === 'end' || client.status === 'close') return false;
+  return readyPromise;
+}
+
+function isRedisReady() {
+  return Boolean(client && client.status === 'ready');
+}
+
 const redis = new Proxy(inMemoryRedis, {
   get: (target, prop) => {
+    if (prop === 'isRedisReady') return isRedisReady;
+    if (prop === 'waitForRedisReady') return waitForRedisReady;
     if (client && client.status === 'ready' && typeof client[prop] === 'function') {
       return (...args) => client[prop](...args).catch(() => target[prop]?.(...args));
     }

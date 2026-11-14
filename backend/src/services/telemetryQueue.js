@@ -1,7 +1,12 @@
-// In-memory queue processor for telemetry and alerts, conforming to Phase 2.2
-// (Background Jobs) of the web migration reference.
+// Hybrid BullMQ + In-Memory Queue for OrbitalOps.
+// Uses real BullMQ queues backed by Redis when REDIS_URL (redis:// or rediss://)
+// or REDIS_HOST is configured and reachable. Seamlessly falls back to an
+// in-process async queue when Redis is unconfigured or temporarily offline.
 
+const { Queue } = require('bullmq');
 const pool = require('../config/db');
+const { getRedisConnection, isRedisConfigured } = require('../config/redisConnection');
+const redisClient = require('../config/redis');
 const circuitBreaker = require('./circuitBreaker');
 const { createPublisher } = require('./socketPubSub');
 const publisher = createPublisher();
@@ -14,6 +19,37 @@ const {
 } = require('../middleware/metrics');
 
 let waitingCount = 0;
+
+let realTelemetryQueue = null;
+let realTelemetryDLQ = null;
+let realAlertQueue = null;
+
+function initBullMQQueues() {
+  if (realTelemetryQueue) return true;
+  const connection = getRedisConnection();
+  if (!connection) return false;
+
+  realTelemetryQueue = new Queue('telemetry-queue', { connection });
+  realTelemetryDLQ = new Queue('telemetry-dlq', { connection });
+  realAlertQueue = new Queue('alert-queue', { connection });
+
+  const onErr = (name) => (err) => {
+    console.warn(`[queue:${name}] BullMQ error:`, err.message);
+  };
+  realTelemetryQueue.on('error', onErr('telemetry'));
+  realTelemetryDLQ.on('error', onErr('dlq'));
+  realAlertQueue.on('error', onErr('alert'));
+
+  console.log('[queue] BullMQ queues initialized with Redis');
+  return true;
+}
+
+async function isBullMQActive() {
+  if (!isRedisConfigured()) return false;
+  const ready = await redisClient.waitForRedisReady();
+  if (!ready) return false;
+  return initBullMQQueues();
+}
 
 // Cached anomaly detector to prevent circular dependencies or teardown require warnings
 let checkAnomalyCached = null;
@@ -61,12 +97,20 @@ async function processTelemetryJob(jobData) {
 
 const telemetryQueue = {
   add: async (name, data, opts = {}) => {
+    if (await isBullMQActive()) {
+      try {
+        return await realTelemetryQueue.add(name, data, opts);
+      } catch (err) {
+        console.warn('[queue] BullMQ enqueue failed, using in-memory fallback:', err.message);
+      }
+    }
+
     waitingCount++;
     queueDepth.set(waitingCount);
 
     const generatedJobId = opts.jobId || `job-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-    // Asynchronous dispatch to simulate realistic queue processing
+    // Asynchronous dispatch for in-process fallback mode
     setTimeout(async () => {
       try {
         await processTelemetryJob(data);
@@ -87,22 +131,60 @@ const telemetryQueue = {
 
     return { id: generatedJobId };
   },
-  getWaitingCount: async () => waitingCount,
+
+  getWaitingCount: async () => {
+    if (await isBullMQActive()) {
+      try {
+        return await realTelemetryQueue.getWaitingCount();
+      } catch (_) {}
+    }
+    return waitingCount;
+  },
 };
 
 const telemetryDLQ = {
-  add: async (name, data) => {
+  add: async (name, data, opts = {}) => {
+    const dlqJobId = opts.jobId || `dlq-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    if (await isBullMQActive()) {
+      try {
+        const job = await realTelemetryDLQ.add(name, data, { ...opts, jobId: dlqJobId });
+        return job;
+      } catch (err) {
+        console.warn('[dlq] BullMQ DLQ enqueue failed, using local fallback:', err.message);
+      }
+    }
+
     dlqJobsTotal.inc();
     console.log(`💀 [DLQ] Job routed to dead-letter queue:`, data);
-    return { id: `dlq-${Date.now()}` };
+    return { id: dlqJobId };
   },
 };
 
 const alertQueue = {
-  add: async (name, data) => {
+  add: async (name, data, opts = {}) => {
+    if (await isBullMQActive()) {
+      try {
+        return await realAlertQueue.add(name, data, opts);
+      } catch (err) {
+        console.warn('[alertQueue] BullMQ enqueue failed, using local fallback:', err.message);
+      }
+    }
+
     console.log(`🔔 [alertQueue] Alert queued: ${data.type} for satellite ${data.satellite_id}`);
     return { id: `alert-job-${Date.now()}` };
   },
 };
 
-module.exports = { telemetryQueue, telemetryDLQ, alertQueue };
+async function closeQueues() {
+  await Promise.all([
+    realTelemetryQueue?.close().catch(() => {}),
+    realTelemetryDLQ?.close().catch(() => {}),
+    realAlertQueue?.close().catch(() => {}),
+    publisher.close().catch(() => {}),
+  ]);
+  realTelemetryQueue = null;
+  realTelemetryDLQ = null;
+  realAlertQueue = null;
+}
+
+module.exports = { telemetryQueue, telemetryDLQ, alertQueue, closeQueues };

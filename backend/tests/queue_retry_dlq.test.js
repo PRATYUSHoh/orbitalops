@@ -52,5 +52,8 @@ describe('Queue Retry Policy, Exponential Backoff Timing & Dead-Letter Queue (DL
     });
 
     expect(job).toHaveProperty('id');
+
+    // Allow background in-memory queue dispatch to finish cleanly before teardown
+    await new Promise((r) => setTimeout(r, 100));
   });
 });
